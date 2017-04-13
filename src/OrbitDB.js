@@ -7,6 +7,8 @@ const KeyValueStore = require('orbit-db-kvstore')
 const CounterStore  = require('orbit-db-counterstore')
 const DocumentStore = require('orbit-db-docstore')
 const Pubsub        = require('orbit-db-pubsub')
+const Cache = require('orbit-db-cache')
+const path = require('path')
 
 const defaultNetworkName = 'Orbit DEV Network'
 
@@ -55,6 +57,54 @@ class OrbitDB {
     this.stores = {}
     this.user = null
     this.network = null
+  }
+
+  create (dbname, type, directory, id, options) {
+    const p = path.join(directory || '.orbitdb', id)
+    this._cache = new Cache(p, dbname)
+    options = Object.assign({}, options, { path: p, cache: this._cache })
+    return this._cache.load()
+      .then(() => this._cache.get(dbname))
+      .then((hash) => {
+        if (hash) 
+          throw new Error(`Database '${dbname}' already exists!`)
+      })
+      .then(() => this._cache.set(dbname, id))
+      .then(() => this._cache.set(dbname + '.localhead', null))
+      .then(() => this._cache.set(dbname + '.remotehead', null))
+      .then(() => this._openDatabase(dbname, type, options))
+  }
+
+  async load (dbname, directory, id, options) {
+    const p = path.join(directory || '.orbitdb', id)
+    this._cache = new Cache(p, dbname)
+    options = Object.assign({}, options, { path: p, cache: this._cache })
+    return this._cache.load()
+      .then(() => this._cache.get(dbname + '.type'))
+      .then((type) => {
+        if (!type && !(options && options.loadAsType))
+          throw new Error(`Database '${dbname}' doesn't exist.`)
+        else if (!type && (options && options.loadAsType))
+          return this.create(dbname, options.loadAsType, directory, id, options)
+
+        return this._openDatabase(dbname, type, options)
+      })
+  }
+
+
+  _openDatabase (dbname, type, options) {
+    if (type === 'counter')
+      return this.counter(dbname, options)
+    else if (type === 'eventlog')
+      return this.eventlog(dbname, options)
+    else if (type === 'feed')
+      return this.feed(dbname, options)
+    else if (type === 'docstore')
+      return this.docstore(dbname, options)
+    else if (type === 'keyvalue')
+      return this.kvstore(dbname, options)
+    else
+      throw new Error(`Unknown database type '${type}'`)
   }
 
   /* Private methods */
